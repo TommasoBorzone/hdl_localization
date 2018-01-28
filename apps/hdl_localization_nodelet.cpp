@@ -22,6 +22,7 @@
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/passthrough.h>
 
 #include <pclomp/ndt_omp.h>
 #include <fast_gicp/ndt/ndt_cuda.hpp>
@@ -161,6 +162,19 @@ private:
     use_distance_filter = private_nh.param<bool>("use_distance_filter", true);
     distance_near_thresh = private_nh.param<double>("distance_near_thresh", 1.0);
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
+    boost::shared_ptr<pcl::PassThrough<PointT>> filter_x(new pcl::PassThrough<PointT>(true));
+    distance_filter_x = filter_x;
+    distance_filter_x->setFilterFieldName("x");
+    distance_filter_x->setFilterLimits(-distance_far_thresh, distance_far_thresh);
+    boost::shared_ptr<pcl::PassThrough<PointT>> filter_y(new pcl::PassThrough<PointT>(true));
+    distance_filter_y = filter_y;
+    distance_filter_y->setFilterFieldName("y");
+    distance_filter_y->setFilterLimits(-distance_far_thresh, distance_far_thresh);
+    boost::shared_ptr<pcl::PassThrough<PointT>> filter_z(new pcl::PassThrough<PointT>(true));
+    distance_filter_z = filter_z;
+    distance_filter_z->setFilterFieldName("z");
+    distance_filter_z->setFilterLimits(-distance_far_thresh, distance_far_thresh);
+
 	
     // initialize pose estimator
     if(private_nh.param<bool>("specify_init_pose", true)) {
@@ -407,22 +421,17 @@ private:
     if(!use_distance_filter) {
         return cloud;
     }
+    pcl::PointCloud<PointT>::Ptr filtered_x(new pcl::PointCloud<PointT>());
+    pcl::PointCloud<PointT>::Ptr filtered_y(new pcl::PointCloud<PointT>());
+    pcl::PointCloud<PointT>::Ptr filtered_z(new pcl::PointCloud<PointT>());
+    distance_filter_x->setInputCloud(cloud);
+    distance_filter_x->filter(*filtered_x);
+    distance_filter_y->setInputCloud(filtered_x);
+    distance_filter_y->filter(*filtered_y);
+    distance_filter_z->setInputCloud(filtered_y);
+    distance_filter_z->filter(*filtered_z);
 
-    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
-    filtered->reserve(cloud->size());
-
-    std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points), [&](const PointT& p) {
-      double d = p.getVector3fMap().norm();
-      return d > distance_near_thresh && d < distance_far_thresh;
-    });
-
-    filtered->width = filtered->size();
-    filtered->height = 1;
-    filtered->is_dense = false;
-
-    filtered->header = cloud->header;
-
-    return filtered;
+    return filtered_z;
   }
 
   /**
@@ -595,6 +604,9 @@ private:
   // globalmap and registration method
   pcl::PointCloud<PointT>::Ptr globalmap;
   pcl::Filter<PointT>::Ptr downsample_filter;
+  pcl::PassThrough<PointT>::Ptr distance_filter_x;
+  pcl::PassThrough<PointT>::Ptr distance_filter_y;
+  pcl::PassThrough<PointT>::Ptr distance_filter_z;
   pcl::Registration<PointT, PointT>::Ptr registration;
   
   bool use_distance_filter;

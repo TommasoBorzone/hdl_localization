@@ -32,14 +32,14 @@
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
 
   <!-- static transform for additional sensors in order to define their tranformation from the os1_sensor frame-->
-  <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 10" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 20" />
   <node pkg="tf" type="static_transform_publisher" name="os1_imu_broadcaster" args="0.006253 -0.011775 0.007645 0.0 0.0 0.0 1.0 os1_sensor os1_imu 10" />
   <node pkg="tf" type="static_transform_publisher" name="real_sense_broadcaster" args="0.675 0.008 -0.96 -1.57 0.0 1.57 os1_sensor camera_odom_frame 10" />
   <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="-0.21 0.0 -0.095 0.0 0.0 0.0 1.0 os1_sensor pixhawk_imu 10" />
 
 
   <!-- sensor throttle in order to change data rate-->
-  <node name="os1_cloud_throttler" type="throttle" pkg="topic_tools" args="messages /os1_cloud_node/points 5" />
+  <node name="os1_cloud_throttler" type="throttle" pkg="topic_tools" args="messages /os1_cloud_node/points 15" />
   <!--<node name="os1_imu_throttler" type="throttle" pkg="topic_tools" args="messages /os1_cloud_node/imu 5" />-->
   <!-- <node name="t265_odom_throttler" type="throttle" pkg="topic_tools" args="messages /camera/odom/sample 20" /> -->
 
