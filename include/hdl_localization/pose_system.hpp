@@ -64,15 +64,13 @@ public:
     Vector3t raw_acc = control.middleRows(0, 3);
     Vector3t raw_gyro = control.middleRows(3, 3);
 
-    // position
-    next_state.middleRows(0, 3) = pt + vt * dt;  //
-
     // velocity
     Vector3t g(0.0f, 0.0f, 9.80665f);
     Vector3t acc_ = raw_acc - acc_bias;
     Vector3t acc = qt * acc_;
     next_state.middleRows(3, 3) = vt + (acc - g) * dt;
-    // next_state.middleRows(3, 3) = vt; // + (acc - g) * dt;		// acceleration didn't contribute to accuracy due to large noise
+    // position
+    next_state.middleRows(0, 3) = pt + vt * dt + 1/2 * (acc - g) * dt* dt;
 
     // orientation
     Vector3t gyro = raw_gyro - gyro_bias;

@@ -75,10 +75,17 @@ public:
   Eigen::Vector3f odom_pos() const;
   Eigen::Quaternionf odom_quat() const;
   Eigen::Matrix4f odom_matrix() const;
+  
+  Eigen::Matrix4f matrix_pose() const;
+  Eigen::Matrix4f matrix_velocity() const;
+  Eigen::Matrix<float, 6, 6> matrix_pose_cov() const;
+  Eigen::Matrix<float, 6, 6> matrix_velocity_cov() const;
 
   const boost::optional<Eigen::Matrix4f>& wo_prediction_error() const;
   const boost::optional<Eigen::Matrix4f>& imu_prediction_error() const;
   const boost::optional<Eigen::Matrix4f>& odom_prediction_error() const;
+  
+  Eigen::Matrix3f quaternionCovToRollPitchYawCov(const Eigen::Matrix4f& covariance, const Eigen::Quaternionf& quat) const;
 
 private:
   ros::Time init_stamp;             // when the estimator was initialized

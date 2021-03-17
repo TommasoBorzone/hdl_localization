@@ -22,9 +22,9 @@ PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registratio
   last_observation.block<3, 1>(0, 3) = pos;
 
   process_noise = Eigen::MatrixXf::Identity(16, 16);
-  process_noise.middleRows(0, 3) *= 1.0;
-  process_noise.middleRows(3, 3) *= 1.0;
-  process_noise.middleRows(6, 4) *= 0.5;
+  process_noise.middleRows(0, 3) *= 0.01;
+  process_noise.middleRows(3, 3) *= 0.1;
+  process_noise.middleRows(6, 4) *= 0.005;
   process_noise.middleRows(10, 3) *= 1e-6;
   process_noise.middleRows(13, 3) *= 1e-6;
 
@@ -33,17 +33,22 @@ PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registratio
   measurement_noise.middleRows(3, 4) *= 0.001;
 
   Eigen::VectorXf mean(16);
+  Eigen::VectorXf residual(7);
   mean.middleRows(0, 3) = pos;
   mean.middleRows(3, 3).setZero();
   mean.middleRows(6, 4) = Eigen::Vector4f(quat.w(), quat.x(), quat.y(), quat.z());
   mean.middleRows(10, 3).setZero();
   mean.middleRows(13, 3).setZero();
 
-  Eigen::MatrixXf cov = Eigen::MatrixXf::Identity(16, 16) * 0.01;
+    Eigen::MatrixXf cov = Eigen::MatrixXf::Identity(16, 16) * 0.01;
+	
+	cov(0,0) = 0.1;
+	cov(1,1) = 0.1;
+	cov(2,2) = 0.1;
 
-  PoseSystem system;
-  ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, mean, cov));
-}
+    PoseSystem system;
+    ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, mean, residual, cov));
+  }
 
 PoseEstimator::~PoseEstimator() {}
 
@@ -102,12 +107,13 @@ void PoseEstimator::predict_odom(const Eigen::Matrix4f& odom_delta) {
     Eigen::MatrixXf odom_measurement_noise = Eigen::MatrixXf::Identity(7, 7) * 1e-3;
 
     Eigen::VectorXf odom_mean(7);
+	Eigen::VectorXf odom_residual(7);
     odom_mean.block<3, 1>(0, 0) = Eigen::Vector3f(ukf->mean[0], ukf->mean[1], ukf->mean[2]);
     odom_mean.block<4, 1>(3, 0) = Eigen::Vector4f(ukf->mean[6], ukf->mean[7], ukf->mean[8], ukf->mean[9]);
     Eigen::MatrixXf odom_cov = Eigen::MatrixXf::Identity(7, 7) * 1e-2;
 
     OdomSystem odom_system;
-    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_mean, odom_cov));
+    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_mean, odom_residual, odom_cov));
   }
 
   // invert quaternion if the rotation axis is flipped
@@ -232,6 +238,34 @@ Eigen::Matrix4f PoseEstimator::matrix() const {
   return m;
 }
 
+  Eigen::Matrix4f PoseEstimator::matrix_pose() const {
+    Eigen::Matrix4f m = Eigen::Matrix4f::Identity();
+    m.block<3, 3>(0, 0) = quat().toRotationMatrix();
+    m.block<3, 1>(0, 3) = pos();
+    return m;
+  }
+  
+  Eigen::Matrix4f PoseEstimator::matrix_velocity() const {
+    Eigen::Matrix4f m = Eigen::Matrix4f::Zero();
+    m.block<3, 1>(0, 3) = vel();
+    return m;
+  }
+  
+   Eigen::Matrix<float, 6, 6> PoseEstimator::matrix_pose_cov() const {
+    Eigen::Matrix<float, 6, 6> m = Eigen::Matrix<float, 6, 6>::Zero();
+    m.block<3, 3>(0, 0) = ukf->cov.block(0,0,3,3);
+
+    m.block<3, 3>(3, 3) = quaternionCovToRollPitchYawCov(ukf->cov.block(3,3,4,4), this->quat());
+
+    return m;
+  }
+  
+   Eigen::Matrix<float, 6, 6> PoseEstimator::matrix_velocity_cov() const {
+    Eigen::Matrix<float, 6, 6> m = Eigen::Matrix<float, 6, 6>::Zero();
+    m.block<3, 3>(0, 0) = ukf->cov.block(3,3,3,3);
+    return m;
+  }
+
 Eigen::Vector3f PoseEstimator::odom_pos() const {
   return Eigen::Vector3f(odom_ukf->mean[0], odom_ukf->mean[1], odom_ukf->mean[2]);
 }
@@ -258,4 +292,39 @@ const boost::optional<Eigen::Matrix4f>& PoseEstimator::imu_prediction_error() co
 const boost::optional<Eigen::Matrix4f>& PoseEstimator::odom_prediction_error() const {
   return odom_pred_error;
 }
+
+  Eigen::Matrix3f PoseEstimator::quaternionCovToRollPitchYawCov(const Eigen::Matrix4f& covariance, const Eigen::Quaternionf& quat) const {
+     Eigen::Matrix<float,3,4> Jacobian = Eigen::Matrix<float,3,4>::Zero();
+
+     float Q3plusQ2 = quat.y() + quat.z();
+     float Q4plusQ1 = quat.x() + quat.w();
+     float Q3minQ2  = quat.z() - quat.y();
+     float Q4minQ1  = quat.w() - quat.x();
+     float prod     = quat.y() * quat.z() + quat.x() * quat.w();
+
+     float den1  = Q3plusQ2*Q3plusQ2 + Q4plusQ1*Q4plusQ1;
+     float den2  = Q3minQ2*Q3minQ2 + Q4minQ1*Q4minQ1;
+
+     float den3  = sqrt(1-4*(prod * prod));
+
+     Jacobian.block<1,4>(0,0) << -(Q3plusQ2)/den1 + (Q3minQ2)/den2,
+         -(Q3plusQ2)/(den1) - Q3minQ2/den2,
+         Q4plusQ1/den1 + Q4minQ1/den2,
+         Q4plusQ1/den1 - Q4minQ1/den2;
+
+     Jacobian.block<1,4>(1,0) << 2 * quat.x() / den3,
+         2 * quat.w() / den3,
+         2 * quat.z() / den3,
+         2 * quat.y() / den3;
+
+     Jacobian.block<1,4>(2,0) << -(Q3plusQ2)/den1 - (Q3minQ2)/den2,
+         -(Q3plusQ2)/(den1) + Q3minQ2/den2,
+         Q4plusQ1/den1 - Q4minQ1/den2,
+         Q4plusQ1/den1 + Q4minQ1/den2;
+
+     return Jacobian * covariance * Jacobian.transpose();
+
+     //return covariance_transformed;
+   }
+
 }

@@ -1,6 +1,7 @@
 #include <mutex>
 #include <memory>
 #include <iostream>
+#include <boost/circular_buffer.hpp>
 
 #include <ros/ros.h>
 #include <pcl_ros/point_cloud.h>
@@ -48,6 +49,7 @@ public:
     mt_nh = getMTNodeHandle();
     private_nh = getPrivateNodeHandle();
 
+    processing_time.resize(16);
     initialize_params();
 
     robot_odom_frame_id = private_nh.param<std::string>("robot_odom_frame_id", "robot_odom");
@@ -60,7 +62,7 @@ public:
       NODELET_INFO("enable imu-based prediction");
       imu_sub = mt_nh.subscribe("/gpsimu_driver/imu_data", 256, &HdlLocalizationNodelet::imu_callback, this);
     }
-    points_sub = mt_nh.subscribe("/velodyne_points", 5, &HdlLocalizationNodelet::points_callback, this);
+    points_sub = mt_nh.subscribe("/velodyne_points", 1, &HdlLocalizationNodelet::points_callback, this);
     globalmap_sub = nh.subscribe("/globalmap", 1, &HdlLocalizationNodelet::globalmap_callback, this);
     initialpose_sub = nh.subscribe("/initialpose", 8, &HdlLocalizationNodelet::initialpose_callback, this);
 
@@ -155,6 +157,11 @@ private:
     relocalizing = false;
     delta_estimater.reset(new DeltaEstimater(create_registration()));
 
+    // distance filter
+    use_distance_filter = private_nh.param<bool>("use_distance_filter", true);
+    distance_near_thresh = private_nh.param<double>("distance_near_thresh", 1.0);
+    distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
+	
     // initialize pose estimator
     if(private_nh.param<bool>("specify_init_pose", true)) {
       NODELET_INFO("initialize pose estimator with specified parameters!!");
@@ -192,7 +199,9 @@ private:
       NODELET_ERROR("globalmap has not been received!!");
       return;
     }
-
+    
+    auto t1 = ros::WallTime::now();
+	
     const auto& stamp = points_msg->header.stamp;
     pcl::PointCloud<PointT>::Ptr pcl_cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*points_msg, *pcl_cloud);
@@ -208,8 +217,14 @@ private:
         NODELET_ERROR("point cloud cannot be transformed into target frame!!");
         return;
     }
+    
+    auto filtered = distance_filter(cloud);
+	if(!use_distance_filter) {
+		filtered = downsample(cloud);
+	} else {
+		filtered = downsample(filtered);
+	}
 
-    auto filtered = downsample(cloud);
     last_scan = filtered;
 
     if(relocalizing) {
@@ -220,7 +235,7 @@ private:
 
     // predict
     if(!use_imu) {
-      pose_estimator->predict(stamp);
+      pose_estimator->predict(stamp, Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero());
     } else {
       std::lock_guard<std::mutex> lock(imu_data_mutex);
       auto imu_iter = imu_data.begin();
@@ -263,12 +278,17 @@ private:
       aligned->header.stamp = cloud->header.stamp;
       aligned_pub.publish(aligned);
     }
+	
+	auto t2 = ros::WallTime::now();
+	processing_time.push_back((t2 - t1).toSec());
+    double avg_processing_time = std::accumulate(processing_time.begin(), processing_time.end(), 0.0) / processing_time.size();
+    NODELET_INFO_STREAM("processing_time: " << avg_processing_time * 1000.0 << "[msec]");
 
-    if(status_pub.getNumSubscribers()) {
-      publish_scan_matching_status(points_msg->header, aligned);
-    }
-
-    publish_odometry(points_msg->header.stamp, pose_estimator->matrix());
+    publish_odometry(	points_msg->header.stamp, 
+								pose_estimator->matrix_pose(), 
+								pose_estimator->matrix_pose_cov(),
+								pose_estimator->matrix_velocity(), 
+								pose_estimator->matrix_velocity_cov());
   }
 
   /**
@@ -368,7 +388,7 @@ private:
   /**
    * @brief downsampling
    * @param cloud   input cloud
-   * @return downsampled cloud
+   * @return filtered downsampled cloud
    */
   pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
     if(!downsample_filter) {
@@ -384,11 +404,34 @@ private:
   }
 
   /**
+   * @brief distance_filter
+   * @param cloud   input cloud
+   * @return filtered downsampled cloud
+   */
+  pcl::PointCloud<PointT>::ConstPtr distance_filter(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
+    filtered->reserve(cloud->size());
+
+    std::copy_if(cloud->begin(), cloud->end(), std::back_inserter(filtered->points), [&](const PointT& p) {
+      double d = p.getVector3fMap().norm();
+      return d > distance_near_thresh && d < distance_far_thresh;
+    });
+
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = false;
+
+    filtered->header = cloud->header;
+
+    return filtered;
+  }
+
+  /**
    * @brief publish odometry
    * @param stamp  timestamp
    * @param pose   odometry pose to be published
    */
-  void publish_odometry(const ros::Time& stamp, const Eigen::Matrix4f& pose) {
+  void publish_odometry(const ros::Time& stamp, const Eigen::Matrix4f& pose, const Eigen::Matrix<float, 6, 6>& pose_cov, const Eigen::Matrix4f& velocity, const Eigen::Matrix<float, 6, 6>& velocity_cov) {
     // broadcast the transform over tf
     if(tf_buffer.canTransform(robot_odom_frame_id, odom_child_frame_id, ros::Time(0))) {
       geometry_msgs::TransformStamped map_wrt_frame = tf2::eigenToTransform(Eigen::Isometry3d(pose.inverse().cast<double>()));
@@ -428,11 +471,46 @@ private:
 
     tf::poseEigenToMsg(Eigen::Isometry3d(pose.cast<double>()), odom.pose.pose);
     odom.child_frame_id = odom_child_frame_id;
-    odom.twist.twist.linear.x = 0.0;
-    odom.twist.twist.linear.y = 0.0;
-    odom.twist.twist.angular.z = 0.0;
+    odom.twist.twist.linear.x = velocity(0,3);
+    odom.twist.twist.linear.y = velocity(1,3);
+    odom.twist.twist.angular.z = velocity(2,3);
+	
+	for (int i = 0; i < pose_cov.size(); i++) {
+		odom.pose.covariance[i] = *(pose_cov.data() + i);
+		odom.twist.covariance[i] = *(velocity_cov.data() + i);
+	}
 
     pose_pub.publish(odom);
+  }
+
+  /**
+   * @brief convert a Eigen::Matrix to TransformedStamped
+   * @param stamp           timestamp
+   * @param pose            pose matrix
+   * @param frame_id        frame_id
+   * @param child_frame_id  child_frame_id
+   * @return transform
+   */
+  geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, const Eigen::Matrix4f& pose, const std::string& frame_id, const std::string& child_frame_id) {
+    Eigen::Quaternionf quat(pose.block<3, 3>(0, 0));
+    quat.normalize();
+    geometry_msgs::Quaternion odom_quat;
+    odom_quat.w = quat.w();
+    odom_quat.x = quat.x();
+    odom_quat.y = quat.y();
+    odom_quat.z = quat.z();
+
+    geometry_msgs::TransformStamped odom_trans;
+    odom_trans.header.stamp = stamp;
+    odom_trans.header.frame_id = frame_id;
+    odom_trans.child_frame_id = child_frame_id;
+
+    odom_trans.transform.translation.x = pose(0, 3);
+    odom_trans.transform.translation.y = pose(1, 3);
+    odom_trans.transform.translation.z = pose(2, 3);
+    odom_trans.transform.rotation = odom_quat;
+
+    return odom_trans;
   }
 
   /**
@@ -519,10 +597,17 @@ private:
   pcl::PointCloud<PointT>::Ptr globalmap;
   pcl::Filter<PointT>::Ptr downsample_filter;
   pcl::Registration<PointT, PointT>::Ptr registration;
+  
+  bool use_distance_filter;
+  double distance_near_thresh;
+  double distance_far_thresh;
 
   // pose estimator
   std::mutex pose_estimator_mutex;
   std::unique_ptr<hdl_localization::PoseEstimator> pose_estimator;
+
+  // processing time buffer
+  boost::circular_buffer<double> processing_time;
 
   // global localization
   bool use_global_localization;

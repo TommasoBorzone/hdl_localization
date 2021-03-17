@@ -31,9 +31,10 @@ public:
    * @param process_noise        process noise covariance (state_dim x state_dim)
    * @param measurement_noise    measurement noise covariance (measurement_dim x measuremend_dim)
    * @param mean                 initial mean
+   * @param residual             difference between true measurement and expected measurement
    * @param cov                  initial covariance
    */
-  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const VectorXt& mean, const MatrixXt& cov)
+  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const VectorXt& mean, const VectorXt& residual, const MatrixXt& cov)
     : state_dim(state_dim),
     input_dim(input_dim),
     measurement_dim(measurement_dim),
@@ -42,6 +43,7 @@ public:
     K(measurement_dim),
     S(2 * state_dim + 1),
     mean(mean),
+    residual(residual),
     cov(cov),
     system(system),
     process_noise(process_noise),
@@ -54,6 +56,13 @@ public:
     ext_weights.resize(2 * (N + K) + 1, 1);
     ext_sigma_points.resize(2 * (N + K) + 1, N + K);
     expected_measurements.resize(2 * (N + K) + 1, K);
+
+    residual_mean.resize(measurement_dim,1);
+    residual_mean = residual;
+    residual_mean2.resize(measurement_dim,1);
+    residual_mean2 = residual;
+    residual_variance.resize(measurement_dim,1);
+    residual_variance = residual;
 
     // initialize weights for unscented filter
     weights[0] = lambda / (N + lambda);
@@ -177,7 +186,8 @@ public:
     kalman_gain = sigma * expected_measurement_cov.inverse();
     const auto& K = kalman_gain;
 
-    VectorXt ext_mean = ext_mean_pred + K * (measurement - expected_measurement_mean);
+    residual = measurement - expected_measurement_mean;
+    VectorXt ext_mean = ext_mean_pred + K * (residual);
     MatrixXt ext_cov = ext_cov_pred - K * expected_measurement_cov * K.transpose();
 
     mean = ext_mean.topLeftCorner(N, 1);
@@ -216,6 +226,12 @@ private:
 
 public:
   VectorXt mean;
+
+  VectorXt residual;
+  VectorXt residual_mean;
+  VectorXt residual_mean2;
+  VectorXt residual_variance;
+
   MatrixXt cov;
 
   System system;
@@ -271,6 +287,35 @@ private:
     }
 
     cov = V * D * V.inverse();
+  }
+
+  /**
+   * @brief This function estimates mean and variance of a m dimensional input_value
+            signal.
+   * @param cov  covariance matrix
+   */
+  void updateStatistics(const VectorXt& input, const int& window_leght) {
+
+      VectorXt ext_mean     = updateMean(residual_mean, input, window_leght);
+
+      VectorXt pow          = input.cwiseProduct(input);
+      VectorXt ext_mean2    = updateMean(residual_mean2, pow, window_leght);
+
+      VectorXt pow2         = ext_mean.cwiseProduct(ext_mean);
+      VectorXt ext_variance = (window_leght/(1-window_leght)) * (ext_mean2 - pow2);
+
+      residual_mean = ext_mean;
+      residual_mean2 = ext_mean2;
+      residual_variance = ext_variance;
+
+      return;
+  }
+
+  VectorXt updateMean(VectorXt& mean,const VectorXt& input, const int& window_leght) {
+      double a = ((window_leght-1)/window_leght);
+      double b = (1/window_leght);
+
+      return a * mean + b * input;
   }
 
 public:

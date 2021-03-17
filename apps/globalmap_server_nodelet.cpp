@@ -7,7 +7,10 @@
 #include <tf_conversions/tf_eigen.h>
 #include <tf/transform_broadcaster.h>
 
+#include <nav_msgs/Odometry.h>
+#include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
