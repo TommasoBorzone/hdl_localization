@@ -218,13 +218,8 @@ private:
         return;
     }
     
-    auto filtered = distance_filter(cloud);
-	if(!use_distance_filter) {
-		filtered = downsample(cloud);
-	} else {
-		filtered = downsample(filtered);
-	}
-
+    auto filtered = downsample(cloud);
+    filtered = distance_filter(filtered);
     last_scan = filtered;
 
     if(relocalizing) {
@@ -409,6 +404,10 @@ private:
    * @return filtered downsampled cloud
    */
   pcl::PointCloud<PointT>::ConstPtr distance_filter(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+    if(!use_distance_filter) {
+        return cloud;
+    }
+
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
     filtered->reserve(cloud->size());
 
