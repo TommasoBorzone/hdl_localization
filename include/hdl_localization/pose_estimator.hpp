@@ -80,6 +80,11 @@ public:
   Eigen::Matrix4f matrix_velocity() const;
   Eigen::Matrix<float, 6, 6> matrix_pose_cov() const;
   Eigen::Matrix<float, 6, 6> matrix_velocity_cov() const;
+  Eigen::Matrix<float,7,7> measurement_noise() const ;
+  Eigen::Matrix<float, 7, 1> get_residual() const ;
+  Eigen::Matrix<float, 7, 1> get_residual_mean() const ;
+  Eigen::Matrix<float, 7, 1> get_residual_mean2() const ;
+  Eigen::Matrix<float, 7, 1> get_residual_variance() const ;
 
   const boost::optional<Eigen::Matrix4f>& wo_prediction_error() const;
   const boost::optional<Eigen::Matrix4f>& imu_prediction_error() const;

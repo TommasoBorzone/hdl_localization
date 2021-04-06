@@ -34,7 +34,7 @@ public:
    * @param residual             difference between true measurement and expected measurement
    * @param cov                  initial covariance
    */
-  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const VectorXt& mean, const VectorXt& residual, const MatrixXt& cov)
+  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const MatrixXt& residual, const VectorXt& mean, const MatrixXt& cov)
     : state_dim(state_dim),
     input_dim(input_dim),
     measurement_dim(measurement_dim),
@@ -43,9 +43,12 @@ public:
     K(measurement_dim),
     S(2 * state_dim + 1),
     mean(mean),
-    residual(residual),
     cov(cov),
     system(system),
+    residual(residual),
+    residual_mean(residual),
+    residual_mean2(residual),
+    residual_variance(residual),
     process_noise(process_noise),
     measurement_noise(measurement_noise),
     lambda(1),
@@ -57,12 +60,10 @@ public:
     ext_sigma_points.resize(2 * (N + K) + 1, N + K);
     expected_measurements.resize(2 * (N + K) + 1, K);
 
-    residual_mean.resize(measurement_dim,1);
-    residual_mean = residual;
-    residual_mean2.resize(measurement_dim,1);
-    residual_mean2 = residual;
-    residual_variance.resize(measurement_dim,1);
-    residual_variance = residual;
+    for (int i = 0; i < measurement_dim; i++) {
+      residual_mean2(i) = measurement_noise(i,i);
+      residual_variance(i)= measurement_noise(i,i);
+    }
 
     // initialize weights for unscented filter
     weights[0] = lambda / (N + lambda);
@@ -149,6 +150,8 @@ public:
    */
   void correct(const VectorXt& measurement) {
     // create extended state space which includes error variances
+	
+	
     VectorXt ext_mean_pred = VectorXt::Zero(N + K, 1);
     MatrixXt ext_cov_pred = MatrixXt::Zero(N + K, N + K);
     ext_mean_pred.topLeftCorner(N, 1) = VectorXt(mean);
@@ -189,7 +192,8 @@ public:
     residual = measurement - expected_measurement_mean;
     VectorXt ext_mean = ext_mean_pred + K * (residual);
     MatrixXt ext_cov = ext_cov_pred - K * expected_measurement_cov * K.transpose();
-
+    
+    updateMeasurementNoise(residual);
     mean = ext_mean.topLeftCorner(N, 1);
     cov = ext_cov.topLeftCorner(N, N);
   }
@@ -296,26 +300,38 @@ private:
    */
   void updateStatistics(const VectorXt& input, const int& window_leght) {
 
-      VectorXt ext_mean     = updateMean(residual_mean, input, window_leght);
-
-      VectorXt pow          = input.cwiseProduct(input);
+      VectorXt ext_mean = updateMean(residual_mean, input, window_leght);
+      VectorXt pow = VectorXt::Zero(measurement_dim);
+      for (int i = 0; i < measurement_dim; i++) {
+          pow[i] = input[i]*input[i];
+      }
       VectorXt ext_mean2    = updateMean(residual_mean2, pow, window_leght);
+      VectorXt pow2 = VectorXt::Zero(measurement_dim);
+      for (int i = 0; i < measurement_dim; i++) {
+          pow2[i] = ext_mean[i]*ext_mean[i];
+      }
+      VectorXt ext_variance = (float(window_leght)/float(window_leght-1)) * (ext_mean2 - pow2);
 
-      VectorXt pow2         = ext_mean.cwiseProduct(ext_mean);
-      VectorXt ext_variance = (window_leght/(1-window_leght)) * (ext_mean2 - pow2);
-
-      residual_mean = ext_mean;
-      residual_mean2 = ext_mean2;
-      residual_variance = ext_variance;
+      residual_mean = ext_mean.col(0);
+      residual_mean2 = ext_mean2.col(0);
+      residual_variance = ext_variance.col(0);
 
       return;
   }
 
-  VectorXt updateMean(VectorXt& mean,const VectorXt& input, const int& window_leght) {
-      double a = ((window_leght-1)/window_leght);
-      double b = (1/window_leght);
+  VectorXt updateMean(const VectorXt& mean,const VectorXt& input, const int& window_leght) {
+      float a = float(window_leght-1)/float(window_leght);
+      float b = float(1)/float(window_leght);
 
       return a * mean + b * input;
+  }
+  
+  void updateMeasurementNoise(const VectorXt& input) {
+    updateStatistics(input, 10);
+    for (int i = 0; i < measurement_dim; i++) {
+       measurement_noise(i,i) = residual_variance[i];
+    }
+	  return;
   }
 
 public:

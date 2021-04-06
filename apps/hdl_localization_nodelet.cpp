@@ -20,6 +20,10 @@
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <geometry_msgs/TwistWithCovarianceStamped.h>
+#include <geometry_msgs/Vector3Stamped.h>
+#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/MultiArrayDimension.h>
 
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/passthrough.h>
@@ -33,6 +37,9 @@
 #include <hdl_localization/ScanMatchingStatus.h>
 #include <hdl_global_localization/SetGlobalMap.h>
 #include <hdl_global_localization/QueryGlobalLocalization.h>
+
+#define H (7)
+#define W (1)
 
 namespace hdl_localization {
 
@@ -55,6 +62,9 @@ public:
 
     robot_odom_frame_id = private_nh.param<std::string>("robot_odom_frame_id", "robot_odom");
     odom_child_frame_id = private_nh.param<std::string>("odom_child_frame_id", "base_link");
+	map_frame_id  = private_nh.param<std::string>("map_frame_id", "map");
+	fcu_body_frame_id = private_nh.param<std::string>("fcu_body_frame_id", "base_link_frd");
+    fcu_map_frame_id = private_nh.param<std::string>("fcu_map_frame_id", "map_nav");
 
     use_imu = private_nh.param<bool>("use_imu", true);
     invert_acc = private_nh.param<bool>("invert_acc", false);
@@ -68,6 +78,8 @@ public:
     initialpose_sub = nh.subscribe("/initialpose", 8, &HdlLocalizationNodelet::initialpose_callback, this);
 
     pose_pub = nh.advertise<nav_msgs::Odometry>("/odom", 5, false);
+	fcu_pose_pub = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("/mavros/vision_pose/pose_cov", 5, false);
+	fcu_speed_pub = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>("/mavros/vision_speed/speed_twist", 5, false);
     aligned_pub = nh.advertise<sensor_msgs::PointCloud2>("/aligned_points", 5, false);
     status_pub = nh.advertise<ScanMatchingStatus>("/status", 5, false);
 
@@ -283,7 +295,7 @@ private:
     auto aligned = pose_estimator->correct(stamp, filtered);
 
     if(aligned_pub.getNumSubscribers()) {
-      aligned->header.frame_id = "map";
+      aligned->header.frame_id = map_frame_id;
       aligned->header.stamp = cloud->header.stamp;
       aligned_pub.publish(aligned);
     }
@@ -440,12 +452,12 @@ private:
    * @param pose   odometry pose to be published
    */
   void publish_odometry(const ros::Time& stamp, const Eigen::Matrix4f& pose, const Eigen::Matrix<float, 6, 6>& pose_cov, const Eigen::Matrix4f& velocity, const Eigen::Matrix<float, 6, 6>& velocity_cov) {
-    // broadcast the transform over tf
+    // broadcast the transformation over tf
     if(tf_buffer.canTransform(robot_odom_frame_id, odom_child_frame_id, ros::Time(0))) {
       geometry_msgs::TransformStamped map_wrt_frame = tf2::eigenToTransform(Eigen::Isometry3d(pose.inverse().cast<double>()));
       map_wrt_frame.header.stamp = stamp;
       map_wrt_frame.header.frame_id = odom_child_frame_id;
-      map_wrt_frame.child_frame_id = "map";
+      map_wrt_frame.child_frame_id = map_frame_id;
 
       geometry_msgs::TransformStamped frame_wrt_odom = tf_buffer.lookupTransform(robot_odom_frame_id, odom_child_frame_id, ros::Time(0), ros::Duration(0.1));
       Eigen::Matrix4f frame2odom = tf2::transformToEigen(frame_wrt_odom).cast<float>().matrix();
@@ -460,35 +472,66 @@ private:
       geometry_msgs::TransformStamped odom_trans;
       odom_trans.transform = tf2::toMsg(odom_wrt_map);
       odom_trans.header.stamp = stamp;
-      odom_trans.header.frame_id = "map";
+      odom_trans.header.frame_id = map_frame_id;
       odom_trans.child_frame_id = robot_odom_frame_id;
 
       tf_broadcaster.sendTransform(odom_trans);
     } else {
       geometry_msgs::TransformStamped odom_trans = tf2::eigenToTransform(Eigen::Isometry3d(pose.cast<double>()));
       odom_trans.header.stamp = stamp;
-      odom_trans.header.frame_id = "map";
+      odom_trans.header.frame_id = map_frame_id;
       odom_trans.child_frame_id = odom_child_frame_id;
       tf_broadcaster.sendTransform(odom_trans);
     }
 
-    // publish the transform
+    // publish the transformation message
     nav_msgs::Odometry odom;
     odom.header.stamp = stamp;
-    odom.header.frame_id = "map";
+    odom.header.frame_id = map_frame_id;
 
     tf::poseEigenToMsg(Eigen::Isometry3d(pose.cast<double>()), odom.pose.pose);
     odom.child_frame_id = odom_child_frame_id;
     odom.twist.twist.linear.x = velocity(0,3);
     odom.twist.twist.linear.y = velocity(1,3);
-    odom.twist.twist.angular.z = velocity(2,3);
+    odom.twist.twist.linear.z = velocity(2,3);
+	
+    // pubblish the pose for the flight control unit
+    geometry_msgs::PoseWithCovarianceStamped fcu_pose_cov;	
+    fcu_pose_cov.header.stamp=stamp;
+    fcu_pose_cov.header.frame_id = fcu_map_frame_id;
+    geometry_msgs::TransformStamped map_wrt_fcu_map = tf_buffer.lookupTransform(fcu_map_frame_id, map_frame_id, ros::Time(0), ros::Duration(0.1));
+    Eigen::Matrix4f fcu_map2map = tf2::transformToEigen(map_wrt_fcu_map).cast<float>().matrix();
+    geometry_msgs::TransformStamped fcu_body_wrt_odom = tf_buffer.lookupTransform(odom_child_frame_id, fcu_body_frame_id, ros::Time(0), ros::Duration(0.1));
+    Eigen::Matrix4f odom2fcu_body = tf2::transformToEigen(fcu_body_wrt_odom).cast<float>().matrix();
+    Eigen::Matrix4f fcu_map2fcu_body = fcu_map2map*pose*odom2fcu_body;
+    tf::poseEigenToMsg(Eigen::Isometry3d(fcu_map2fcu_body.cast<double>()), fcu_pose_cov.pose.pose);
+	
+    // pubblish the speed for the flight control unit
+    geometry_msgs::TwistWithCovarianceStamped fcu_speed_cov;
+    fcu_speed_cov.header.stamp=stamp;
+    fcu_speed_cov.header.frame_id = fcu_map_frame_id;
+    geometry_msgs::Vector3Stamped fcu_speed_in, fcu_speed_out;
+    fcu_speed_in.header.frame_id = map_frame_id;
+    fcu_speed_in.vector.x = velocity(0,3);
+    fcu_speed_in.vector.y = velocity(1,3);
+    fcu_speed_in.vector.z = velocity(2,3);
+    fcu_speed_out = tf_buffer.transform(fcu_speed_in, fcu_map_frame_id, ros::Duration(0.1));
+    fcu_speed_cov.twist.twist.linear.x = fcu_speed_out.vector.x;
+    fcu_speed_cov.twist.twist.linear.y = fcu_speed_out.vector.y;
+    fcu_speed_cov.twist.twist.linear.z = fcu_speed_out.vector.z;
+	
 	
 	for (int i = 0; i < pose_cov.size(); i++) {
 		odom.pose.covariance[i] = *(pose_cov.data() + i);
 		odom.twist.covariance[i] = *(velocity_cov.data() + i);
+		fcu_pose_cov.pose.covariance[i] = *(pose_cov.data() + i);
+		fcu_speed_cov.twist.covariance[i] = *(velocity_cov.data() + i);
 	}
-
-    pose_pub.publish(odom);
+	
+  pose_pub.publish(odom);
+	fcu_pose_pub.publish(fcu_pose_cov);
+	fcu_speed_pub.publish(fcu_speed_cov);
+	
   }
 
   /**
@@ -578,8 +621,11 @@ private:
   ros::NodeHandle mt_nh;
   ros::NodeHandle private_nh;
 
-  std::string robot_odom_frame_id;
+  std::string map_frame_id;
   std::string odom_child_frame_id;
+  std::string robot_odom_frame_id;
+  std::string fcu_map_frame_id;
+  std::string fcu_body_frame_id;
 
   bool use_imu;
   bool invert_acc;
@@ -590,6 +636,8 @@ private:
   ros::Subscriber initialpose_sub;
 
   ros::Publisher pose_pub;
+  ros::Publisher fcu_pose_pub;
+  ros::Publisher fcu_speed_pub;
   ros::Publisher aligned_pub;
   ros::Publisher status_pub;
 

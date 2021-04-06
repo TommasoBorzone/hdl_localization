@@ -33,21 +33,22 @@ PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registratio
   measurement_noise.middleRows(3, 4) *= 0.001;
 
   Eigen::VectorXf mean(16);
-  Eigen::VectorXf residual(7);
   mean.middleRows(0, 3) = pos;
   mean.middleRows(3, 3).setZero();
   mean.middleRows(6, 4) = Eigen::Vector4f(quat.w(), quat.x(), quat.y(), quat.z());
   mean.middleRows(10, 3).setZero();
   mean.middleRows(13, 3).setZero();
 
-    Eigen::MatrixXf cov = Eigen::MatrixXf::Identity(16, 16) * 0.01;
+  Eigen::VectorXf residual= Eigen::VectorXf::Zero(7);
+
+  Eigen::MatrixXf cov = Eigen::MatrixXf::Identity(16, 16) * 0.01;
 	
 	cov(0,0) = 0.1;
 	cov(1,1) = 0.1;
 	cov(2,2) = 0.1;
 
     PoseSystem system;
-    ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, mean, residual, cov));
+    ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, residual, mean, cov));
   }
 
 PoseEstimator::~PoseEstimator() {}
@@ -105,15 +106,15 @@ void PoseEstimator::predict_odom(const Eigen::Matrix4f& odom_delta) {
   if(!odom_ukf) {
     Eigen::MatrixXf odom_process_noise = Eigen::MatrixXf::Identity(7, 7);
     Eigen::MatrixXf odom_measurement_noise = Eigen::MatrixXf::Identity(7, 7) * 1e-3;
+    Eigen::VectorXf odom_residual = Eigen::Vector3f::Zero(7);
 
     Eigen::VectorXf odom_mean(7);
-	Eigen::VectorXf odom_residual(7);
     odom_mean.block<3, 1>(0, 0) = Eigen::Vector3f(ukf->mean[0], ukf->mean[1], ukf->mean[2]);
     odom_mean.block<4, 1>(3, 0) = Eigen::Vector4f(ukf->mean[6], ukf->mean[7], ukf->mean[8], ukf->mean[9]);
     Eigen::MatrixXf odom_cov = Eigen::MatrixXf::Identity(7, 7) * 1e-2;
 
     OdomSystem odom_system;
-    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_mean, odom_residual, odom_cov));
+    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_residual, odom_mean, odom_cov));
   }
 
   // invert quaternion if the rotation axis is flipped
@@ -268,6 +269,36 @@ Eigen::Matrix4f PoseEstimator::matrix() const {
 
 Eigen::Vector3f PoseEstimator::odom_pos() const {
   return Eigen::Vector3f(odom_ukf->mean[0], odom_ukf->mean[1], odom_ukf->mean[2]);
+}
+
+Eigen::Matrix<float, 7, 7> PoseEstimator::measurement_noise() const {
+  Eigen::Matrix<float, 7, 7> m = Eigen::Matrix<float, 7, 7>::Zero();
+  m = ukf->measurement_noise.block(0,0,7,7);
+  return m;
+}
+
+Eigen::Matrix<float, 7, 1> PoseEstimator::get_residual() const {
+  Eigen::Matrix<float, 7, 1> v = Eigen::Matrix<float, 7, 1>::Zero();
+  v = ukf->residual.col(0);
+  return v;
+}
+
+Eigen::Matrix<float, 7, 1> PoseEstimator::get_residual_mean() const {
+  Eigen::Matrix<float, 7, 1> v = Eigen::Matrix<float, 7, 1>::Zero();
+  v = ukf->residual_mean.col(0);
+  return v;
+}
+
+Eigen::Matrix<float, 7, 1> PoseEstimator::get_residual_mean2() const {
+  Eigen::Matrix<float, 7, 1> v = Eigen::Matrix<float, 7, 1>::Zero();
+  v = ukf->residual_mean2.col(0);
+  return v;
+}
+
+Eigen::Matrix<float, 7, 1> PoseEstimator::get_residual_variance() const {
+  Eigen::Matrix<float, 7, 1> v = Eigen::Matrix<float, 7, 1>::Zero();
+  v = ukf->residual_variance.col(0);
+  return v;
 }
 
 Eigen::Quaternionf PoseEstimator::odom_quat() const {

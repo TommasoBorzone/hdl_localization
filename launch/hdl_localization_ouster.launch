@@ -5,7 +5,10 @@
   <arg name="points_topic" default="/os1_cloud_node/points_throttle" />
   <!-- input clouds are transformed in odom_child_frame, and then localization is performed in that frame -->
   <!-- this is useful to match the LIDAR and IMU coodinate systems -->
-  <arg name="odom_child_frame_id" default="os1_sensor" />
+  <arg name="odom_child_frame_id" default="base_link" />
+  <arg name="map_frame_id" default="map" />
+  <arg name="fcu_map_frame_id" default="map_ned" />
+  <arg name="fcu_body_frame_id" default="base_link_frd" />
 
   <!-- optional arguments -->
   <arg name="use_imu" default="true" />
@@ -14,7 +17,7 @@
   <arg name="use_global_localization" default="true" />
   <arg name="imu_topic" default="/mavros/imu/data_raw" />
   <arg name="imu_topic_transformed" default="/mavros/imu/data_raw_transformed" />
-  <arg name="imu_frame_id" default="os1_sensor" />
+  <arg name="imu_frame_id" default="base_link" />
   <arg name="enable_robot_odometry_prediction" value="false" />
   <arg name="robot_odom_frame_id" value="odom" />
   <arg name="plot_estimation_errors" value="false" />
@@ -25,17 +28,23 @@
   <arg name="init_ori_x" default="0.0" />
   <arg name="init_ori_y" default="0.0" />
   <arg name="init_ori_z" default="0.0" />
+  <arg name="fcu_url" default="udp://:14540@127.0.0.1:14557"/>
 
   <include file="$(find hdl_global_localization)/launch/hdl_global_localization.launch" if="$(arg use_global_localization)" />
+
+  <include file="$(find hdl_localization)/launch/mavros.launch" >
+    <arg name="fcu_url" value="$(arg fcu_url)"/>
+  </include>
 
   <!-- in case you use velodyne_driver, comment out the following line -->
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
 
   <!-- static transform for additional sensors in order to define their tranformation from the os1_sensor frame-->
-  <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 20" />
-  <node pkg="tf" type="static_transform_publisher" name="os1_imu_broadcaster" args="0.006253 -0.011775 0.007645 0.0 0.0 0.0 1.0 os1_sensor os1_imu 10" />
-  <node pkg="tf" type="static_transform_publisher" name="real_sense_broadcaster" args="0.675 0.008 -0.96 -1.57 0.0 1.57 os1_sensor camera_odom_frame 10" />
-  <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="-0.21 0.0 -0.095 0.0 0.0 0.0 1.0 os1_sensor pixhawk_imu 10" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_sensor_broadcaster" args="-0.21 0.0 -0.095 0.0 0.0 0.0 1.0 base_link os1_sensor  50" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 50" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_imu_broadcaster" args="0.006253 -0.011775 0.007645 0.0 0.0 0.0 1.0 os1_sensor os1_imu 50" />
+  <node pkg="tf" type="static_transform_publisher" name="real_sense_broadcaster" args="0.675 0.008 -0.96 -1.57 0.0 1.57 os1_sensor camera_odom_frame 20" />
+  <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 base_link pixhawk_imu 20" />
 
 
   <!-- sensor throttle in order to change data rate-->
@@ -63,6 +72,9 @@
       <remap from="/gpsimu_driver/imu_data" to="$(arg imu_topic_transformed)" />
       <!-- odometry frame_id -->
       <param name="odom_child_frame_id" value="$(arg odom_child_frame_id)" />
+      <param name="map_frame_id" value="$(arg map_frame_id)" />
+      <param name="fcu_map_frame_id" value="$(arg fcu_map_frame_id)" />
+      <param name="fcu_body_frame_id" value="$(arg fcu_body_frame_id)" />
       <!-- imu settings -->
       <!-- during "cool_time", imu inputs are ignored -->
       <param name="use_imu" value="$(arg use_imu)" />
@@ -74,7 +86,7 @@
       <param name="robot_odom_frame_id" value="$(arg robot_odom_frame_id)" />
       <!-- ndt settings -->
       <!-- available reg_methods: NDT_OMP, NDT_CUDA_P2D, NDT_CUDA_D2D-->
-      <param name="reg_method" value="NDT_CUDA_D2D" />
+      <param name="reg_method" value="NDT_OMP" />
       <!-- if NDT is slow for your PC, try DIRECT1 serach method, which is a bit unstable but extremely fast -->
       <param name="ndt_neighbor_search_method" value="DIRECT1" />
       <param name="ndt_neighbor_search_radius" value="1.0" />
