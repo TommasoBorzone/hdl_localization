@@ -33,8 +33,9 @@ public:
    * @param mean                 initial mean
    * @param residual             difference between true measurement and expected measurement
    * @param cov                  initial covariance
+   * @param use_cov estim        To use or not the measuremets online covariance estimation
    */
-  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const MatrixXt& residual, const VectorXt& mean, const MatrixXt& cov)
+  UnscentedKalmanFilterX(const System& system, int state_dim, int input_dim, int measurement_dim, const MatrixXt& process_noise, const MatrixXt& measurement_noise, const MatrixXt& residual, const VectorXt& mean, const MatrixXt& cov,  bool use_measurements_cov_estim)
     : state_dim(state_dim),
     input_dim(input_dim),
     measurement_dim(measurement_dim),
@@ -52,7 +53,8 @@ public:
     process_noise(process_noise),
     measurement_noise(measurement_noise),
     lambda(1),
-    normal_dist(0.0, 1.0)
+    normal_dist(0.0, 1.0),
+    use_measurements_cov_estim(use_measurements_cov_estim)
   {
     weights.resize(S, 1);
     sigma_points.resize(S, N);
@@ -193,7 +195,9 @@ public:
     VectorXt ext_mean = ext_mean_pred + K * (residual);
     MatrixXt ext_cov = ext_cov_pred - K * expected_measurement_cov * K.transpose();
     
-    updateMeasurementNoise(residual);
+    if (use_measurements_cov_estim) {
+      updateMeasurementNoise(residual);
+    }
     mean = ext_mean.topLeftCorner(N, 1);
     cov = ext_cov.topLeftCorner(N, N);
   }
@@ -227,6 +231,8 @@ private:
   const int M;
   const int K;
   const int S;
+
+  bool use_measurements_cov_estim;
 
 public:
   VectorXt mean;

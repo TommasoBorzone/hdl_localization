@@ -62,8 +62,8 @@ public:
 
     robot_odom_frame_id = private_nh.param<std::string>("robot_odom_frame_id", "robot_odom");
     odom_child_frame_id = private_nh.param<std::string>("odom_child_frame_id", "base_link");
-	map_frame_id  = private_nh.param<std::string>("map_frame_id", "map");
-	fcu_body_frame_id = private_nh.param<std::string>("fcu_body_frame_id", "base_link_frd");
+    map_frame_id  = private_nh.param<std::string>("map_frame_id", "map");
+    fcu_body_frame_id = private_nh.param<std::string>("fcu_body_frame_id", "base_link_frd");
     fcu_map_frame_id = private_nh.param<std::string>("fcu_map_frame_id", "map_nav");
 
     use_imu = private_nh.param<bool>("use_imu", true);
@@ -78,8 +78,8 @@ public:
     initialpose_sub = nh.subscribe("/initialpose", 8, &HdlLocalizationNodelet::initialpose_callback, this);
 
     pose_pub = nh.advertise<nav_msgs::Odometry>("/odom", 5, false);
-	fcu_pose_pub = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("/mavros/vision_pose/pose_cov", 5, false);
-	fcu_speed_pub = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>("/mavros/vision_speed/speed_twist", 5, false);
+    fcu_pose_pub = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>("/mavros/vision_pose/pose_cov", 5, false);
+    fcu_speed_pub = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>("/mavros/vision_speed/speed_twist", 5, false);
     aligned_pub = nh.advertise<sensor_msgs::PointCloud2>("/aligned_points", 5, false);
     status_pub = nh.advertise<ScanMatchingStatus>("/status", 5, false);
 
@@ -195,7 +195,8 @@ private:
         ros::Time::now(),
         Eigen::Vector3f(private_nh.param<double>("init_pos_x", 0.0), private_nh.param<double>("init_pos_y", 0.0), private_nh.param<double>("init_pos_z", 0.0)),
         Eigen::Quaternionf(private_nh.param<double>("init_ori_w", 1.0), private_nh.param<double>("init_ori_x", 0.0), private_nh.param<double>("init_ori_y", 0.0), private_nh.param<double>("init_ori_z", 0.0)),
-        private_nh.param<double>("cool_time_duration", 0.5)
+        private_nh.param<double>("cool_time_duration", 0.5),
+        private_nh.param<bool>("use_measurements_covariance_online_estimation", true)
       ));
     }
   }

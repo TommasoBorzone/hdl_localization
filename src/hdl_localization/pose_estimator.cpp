@@ -15,8 +15,8 @@ namespace hdl_localization {
  * @param quat                initial orientation
  * @param cool_time_duration  during "cool time", prediction is not performed
  */
-PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registration, const ros::Time& stamp, const Eigen::Vector3f& pos, const Eigen::Quaternionf& quat, double cool_time_duration)
-    : init_stamp(stamp), registration(registration), cool_time_duration(cool_time_duration) {
+PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registration, const ros::Time& stamp, const Eigen::Vector3f& pos, const Eigen::Quaternionf& quat, double cool_time_duration, bool use_measurements_cov_estim)
+    : init_stamp(stamp), registration(registration), cool_time_duration(cool_time_duration), use_measurements_cov_estim(use_measurements_cov_estim) {
   last_observation = Eigen::Matrix4f::Identity();
   last_observation.block<3, 3>(0, 0) = quat.toRotationMatrix();
   last_observation.block<3, 1>(0, 3) = pos;
@@ -48,7 +48,7 @@ PoseEstimator::PoseEstimator(pcl::Registration<PointT, PointT>::Ptr& registratio
 	cov(2,2) = 0.1;
 
     PoseSystem system;
-    ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, residual, mean, cov));
+    ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, PoseSystem>(system, 16, 6, 7, process_noise, measurement_noise, residual, mean, cov, use_measurements_cov_estim));
   }
 
 PoseEstimator::~PoseEstimator() {}
@@ -114,7 +114,7 @@ void PoseEstimator::predict_odom(const Eigen::Matrix4f& odom_delta) {
     Eigen::MatrixXf odom_cov = Eigen::MatrixXf::Identity(7, 7) * 1e-2;
 
     OdomSystem odom_system;
-    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_residual, odom_mean, odom_cov));
+    odom_ukf.reset(new kkl::alg::UnscentedKalmanFilterX<float, OdomSystem>(odom_system, 7, 7, 7, odom_process_noise, odom_measurement_noise, odom_residual, odom_mean, odom_cov, use_measurements_cov_estim));
   }
 
   // invert quaternion if the rotation axis is flipped

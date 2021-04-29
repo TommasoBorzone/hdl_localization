@@ -12,6 +12,7 @@
 
   <!-- optional arguments -->
   <arg name="use_imu" default="true" />
+  <arg name="use_measurements_covariance_online_estimation" default="true" />
   <arg name="invert_imu_acc" default="false" />
   <arg name="invert_imu_gyro" default="false" />
   <arg name="use_global_localization" default="true" />
@@ -40,11 +41,11 @@
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
 
   <!-- static transform for additional sensors in order to define their tranformation from the os1_sensor frame-->
-  <node pkg="tf" type="static_transform_publisher" name="os1_sensor_broadcaster" args="-0.21 0.0 -0.095 0.0 0.0 0.0 1.0 base_link os1_sensor  50" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_sensor_broadcaster" args="0.21 0.0 0.095 0.0 0.0 0.0 1.0 base_link os1_sensor  50" />
   <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 50" />
   <node pkg="tf" type="static_transform_publisher" name="os1_imu_broadcaster" args="0.006253 -0.011775 0.007645 0.0 0.0 0.0 1.0 os1_sensor os1_imu 50" />
   <node pkg="tf" type="static_transform_publisher" name="real_sense_broadcaster" args="0.675 0.008 -0.96 -1.57 0.0 1.57 os1_sensor camera_odom_frame 20" />
-  <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 base_link pixhawk_imu 20" />
+  <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 base_link pixhawk_imu 50" />
 
 
   <!-- sensor throttle in order to change data rate-->
@@ -84,6 +85,8 @@
       <!-- robot odometry-based prediction -->
       <param name="enable_robot_odometry_prediction" value="$(arg enable_robot_odometry_prediction)" />
       <param name="robot_odom_frame_id" value="$(arg robot_odom_frame_id)" />
+      <!-- robot measurement covariance estimation in correction phase -->
+      <param name="use_measurements_covariance_online_estimation" value="$(arg use_measurements_covariance_online_estimation)" />
       <!-- ndt settings -->
       <!-- available reg_methods: NDT_OMP, NDT_CUDA_P2D, NDT_CUDA_D2D-->
       <param name="reg_method" value="NDT_OMP" />

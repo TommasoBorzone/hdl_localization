@@ -1,0 +1,9 @@
+plugin_whitelist: 
+- 'sys_*'
+- vision_pose_estimate
+- vision_speed_estimate
+
+plugin_blacklist: []
+
+
+
