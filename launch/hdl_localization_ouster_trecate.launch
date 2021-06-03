@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- arguments -->
+  <arg name="nodelet_manager" default="ouster_nodelet_manager" />
+  <arg name="points_topic" default="/os1_cloud_node/points" />
+  <!-- input clouds are transformed in odom_child_frame, and then localization is performed in that frame -->
+  <!-- this is useful to match the LIDAR and IMU coodinate systems -->
+  <arg name="odom_child_frame_id" default="base_link" />
+  <arg name="globalmap_pcd" default="$(find hdl_localization)/data/map-0_01.pcd" />
+  <arg name="map_frame_id" default="map" />
+  <arg name="fcu_map_frame_id" default="map_ned" />
+  <arg name="fcu_body_frame_id" default="base_link_frd" />
+
+  <!-- optional arguments -->
+  <arg name="use_imu" default="true" />
+  <arg name="use_measurements_covariance_online_estimation" default="false" />
+  <arg name="invert_imu_acc" default="false" />
+  <arg name="invert_imu_gyro" default="false" />
+  <arg name="use_global_localization" default="true" />
+  <arg name="imu_topic" default="/mavros/imu/data_raw" />
+  <arg name="imu_topic_transformed" default="/mavros/imu/data_raw_transformed" />
+  <arg name="imu_frame_id" default="base_link" />
+  <arg name="enable_robot_odometry_prediction" value="false" />
+  <arg name="robot_odom_frame_id" value="odom" />
+  <arg name="plot_estimation_errors" value="false" />
+  <arg name="init_pos_x" default="0.0" /> 
+  <arg name="init_pos_y" default="0.0" /> 
+  <arg name="init_pos_z" default="1.65" /> 
+  <arg name="init_ori_w" default="1.0" />
+  <arg name="init_ori_x" default="0.0" />
+  <arg name="init_ori_y" default="0.0" />
+  <arg name="init_ori_z" default="0.0" />
+  <arg name="fcu_url" default="udp://:14540@127.0.0.1:14557"/>
+
+  <include file="$(find hdl_global_localization)/launch/hdl_global_localization.launch" if="$(arg use_global_localization)" />
+
+  <include file="$(find hdl_localization)/launch/mavros.launch" >
+    <arg name="fcu_url" value="$(arg fcu_url)"/>
+  </include>
+
+  <!-- in case you use velodyne_driver, comment out the following line -->
+  <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
+
+  <!-- static transform for additional sensors in order to define their tranformation from the os1_sensor frame-->
+  <node pkg="tf" type="static_transform_publisher" name="os1_sensor_broadcaster" args="0.21 0.0 0.095 0.0 0.0 0.0 1.0 base_link os1_sensor  50" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_lidar_broadcaster" args="0.0 0.0 0.03618 0.0 0.0 1.0 0.0 os1_sensor os1_lidar 50" />
+  <node pkg="tf" type="static_transform_publisher" name="os1_imu_broadcaster" args="0.006253 -0.011775 0.007645 0.0 0.0 0.0 1.0 os1_sensor os1_imu 50" />
+  <node pkg="tf" type="static_transform_publisher" name="real_sense_broadcaster" args="0.675 0.008 -0.96 -1.57 0.0 1.57 os1_sensor camera_odom_frame 20" />
+  <node pkg="tf" type="static_transform_publisher" name="pixhawk_broadcaster" args="0.0 0.0 0.0 0.0 0.0 0.0 1.0 base_link pixhawk_imu 50" />
+
+
+  <!--sensor throttle in order to change data rate-->
+  <node name="os1_cloud_throttler" type="throttle" pkg="topic_tools" args="messages /os1_cloud_node/points 15" />
+  <!--<node name="os1_imu_throttler" type="throttle" pkg="topic_tools" args="messages /os1_cloud_node/imu 5" />-->
+  <!-- <node name="t265_odom_throttler" type="throttle" pkg="topic_tools" args="messages /camera/odom/sample 20" /> -->
+
+  <!-- imu_data_transfomer_nodelet to transform imu data to os1_sensor frame-->
+  <node pkg="nodelet" type="nodelet" name="imu_data_transformer_nodelet" args="load imu_transformer/imu_transformer_nodelet $(arg nodelet_manager)">
+    <remap from="imu_in/data" to="$(arg imu_topic)"/>
+    <remap from="imu_out/data" to="$(arg imu_topic_transformed)"/>
+    <param name="target_frame" value="os1_sensor"/>
+  </node>
+  
+    <!-- globalmap_server_nodelet -->
+    <node pkg="nodelet" type="nodelet" name="globalmap_server_nodelet" args="load hdl_localization/GlobalmapServerNodelet $(arg nodelet_manager)">
+      <param name="globalmap_pcd" value="$(arg globalmap_pcd)" />
+      <param name="convert_utm_to_local" value="true" />
+      <param name="downsample_resolution" value="0.1" />
+    </node>
+
+    <!-- hdl_localization_nodelet -->
+    <node pkg="nodelet" type="nodelet" name="hdl_localization_nodelet" args="load hdl_localization/HdlLocalizationNodelet $(arg nodelet_manager)">
+      <remap from="/velodyne_points" to="$(arg points_topic)" />
+      <remap from="/gpsimu_driver/imu_data" to="$(arg imu_topic_transformed)" />
+      <!-- odometry frame_id -->
+      <param name="odom_child_frame_id" value="$(arg odom_child_frame_id)" />
+      <param name="map_frame_id" value="$(arg map_frame_id)" />
+      <param name="fcu_map_frame_id" value="$(arg fcu_map_frame_id)" />
+      <param name="fcu_body_frame_id" value="$(arg fcu_body_frame_id)" />
+      <!-- imu settings -->
+      <!-- during "cool_time", imu inputs are ignored -->
+      <param name="use_imu" value="$(arg use_imu)" />
+      <param name="invert_acc" value="$(arg invert_imu_acc)" />
+      <param name="invert_gyro" value="$(arg invert_imu_gyro)" />
+      <param name="cool_time_duration" value="2.0" />
+      <!-- robot odometry-based prediction -->
+      <param name="enable_robot_odometry_prediction" value="$(arg enable_robot_odometry_prediction)" />
+      <param name="robot_odom_frame_id" value="$(arg robot_odom_frame_id)" />
+      <!-- robot measurement covariance estimation in correction phase -->
+      <param name="use_measurements_covariance_online_estimation" value="$(arg use_measurements_covariance_online_estimation)" />
+      <!-- ndt settings -->
+      <!-- available reg_methods: NDT_OMP, NDT_CUDA_P2D, NDT_CUDA_D2D-->
+      <param name="reg_method" value="NDT_CUDA_D2D" />
+      <!-- if NDT is slow for your PC, try DIRECT1 serach method, which is a bit unstable but extremely fast -->
+      <param name="ndt_neighbor_search_method" value="DIRECT1" />
+      <param name="ndt_neighbor_search_radius" value="1.0" />
+      <param name="ndt_resolution" value="1.0" />
+      <param name="downsample_resolution" value="0.1" />
+      <param name="use_distance_filter" value="true" />
+      <param name="distance_near_thresh" value="0.2" />
+      <param name="distance_far_thresh" value="16.0" />
+      <!-- if "specify_init_pose" is true, pose estimator will be initialized with the following params -->
+      <!-- otherwise, you need to input an initial pose with "2D Pose Estimate" on rviz" -->
+      <param name="specify_init_pose" value="true" />
+      <param name="init_pos_x" value="$(arg init_pos_x)" /> 
+      <param name="init_pos_y" value="$(arg init_pos_y)" /> 
+      <param name="init_pos_z" value="$(arg init_pos_z)" /> 
+      <param name="init_ori_w" value="$(arg init_ori_w)" />
+      <param name="init_ori_x" value="$(arg init_ori_x)" />
+      <param name="init_ori_y" value="$(arg init_ori_y)" />
+      <param name="init_ori_z" value="$(arg init_ori_z)" /> <!-- 1.0 os1_lidar-->
+
+      <param name="use_global_localization" value="$(arg use_global_localization)" />
+    </node>
+
+    <node pkg="hdl_localization" type="plot_status.py" name="plot_estimation_errors" if="$(arg plot_estimation_errors)" />
+</launch>

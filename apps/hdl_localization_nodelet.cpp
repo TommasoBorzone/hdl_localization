@@ -187,6 +187,9 @@ private:
     distance_filter_z->setFilterFieldName("z");
     distance_filter_z->setFilterLimits(-distance_far_thresh, distance_far_thresh);
 
+    // subsampling_factor
+    subsampling_factor = private_nh.param<int>("sabsampling_factor", 1);
+
 	
     // initialize pose estimator
     if(private_nh.param<bool>("specify_init_pose", true)) {
@@ -217,6 +220,14 @@ private:
    */
   void points_callback(const sensor_msgs::PointCloud2ConstPtr& points_msg) {
     std::lock_guard<std::mutex> estimator_lock(pose_estimator_mutex);
+    
+
+    // proccess 1 colud every 2 
+    /*static int process(0);
+    process++;
+    if (process < 1) return;
+    process = 0;*/
+
     if(!pose_estimator) {
       NODELET_ERROR("waiting for initial pose input!!");
       return;
@@ -304,7 +315,7 @@ private:
 	auto t2 = ros::WallTime::now();
 	processing_time.push_back((t2 - t1).toSec());
     double avg_processing_time = std::accumulate(processing_time.begin(), processing_time.end(), 0.0) / processing_time.size();
-    NODELET_INFO_STREAM("processing_time: " << avg_processing_time * 1000.0 << "[msec]");
+    //NODELET_INFO_STREAM("processing_time: " << avg_processing_time * 1000.0 << "[msec]");
 
     publish_odometry(	points_msg->header.stamp, 
 								pose_estimator->matrix_pose(), 
@@ -631,6 +642,7 @@ private:
   bool use_imu;
   bool invert_acc;
   bool invert_gyro;
+  int subsampling_factor;
   ros::Subscriber imu_sub;
   ros::Subscriber points_sub;
   ros::Subscriber globalmap_sub;
